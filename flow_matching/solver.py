@@ -2,7 +2,7 @@
 
 from abc import ABC
 from collections.abc import Callable, Sequence
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import torch
 from torch import Tensor, nn
@@ -180,7 +180,7 @@ class ODESolver:
         exact_divergence: bool = False,
         enable_grad: bool = False,
         **model_extras,
-    ) -> Union[tuple[Tensor, Tensor], tuple[Sequence[Tensor], Tensor]]:
+    ) -> Union[Tuple[Tensor, Tensor], Tuple[Sequence[Tensor], Tensor]]:
         r"""Solve for log likelihood given a target sample at :math:`t=0`.
 
         Works similarly to sample, but solves the ODE in reverse to compute the log-likelihood. The velocity model must be differentiable with respect to x.
@@ -277,7 +277,7 @@ class ODESolver:
         n_probe: int = 2,
         use_exact_divergence: Optional[bool] = None,
         **model_extras,
-    ) -> tuple[Union[Tensor, Sequence[Tensor]], Tensor]:
+    ) -> Tuple[Union[Tensor, Sequence[Tensor]], Tensor]:
         r"""Sample with entropy estimation via divergence integration.
 
         Computes H(p_1) = H(p_0) + ∫_0^1 E[∇·v_θ(x_t, t)] dt during sampling.

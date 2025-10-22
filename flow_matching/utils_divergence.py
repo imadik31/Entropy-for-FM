@@ -11,7 +11,7 @@ References:
     - Flow matching divergence alignment: https://openreview.net/forum?id=PqvMRDCJT9t
 """
 
-from typing import Optional
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -116,7 +116,7 @@ def hutchinson_divergence(v_func, x: Tensor, t: Tensor, n_probe: int = 1) -> Ten
 
 
 def compute_entropy_from_divergence(
-    divergence_values: list[Tensor],
+    divergence_values: List[Tensor],
     time_steps: Tensor,
     base_entropy: Optional[float] = None,
     dim: Optional[int] = None,
