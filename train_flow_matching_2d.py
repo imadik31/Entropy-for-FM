@@ -143,6 +143,13 @@ def main():
         filename=f"likelihood_{args.dataset}.png",
     )
 
+    visualization.compute_and_log_entropy(
+        flow=wrapped_model,
+        dataset=dataset,
+        output_dir=args.output_dir,
+        filename=f"entropy_{args.dataset}.txt",
+    )
+
 
 if __name__ == "__main__":
     main()

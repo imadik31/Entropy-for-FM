@@ -186,6 +186,61 @@ def generate_samples_and_save_animation(args: ScriptArguments):
     ani.save(output_dir / "trajectory.gif", writer="pillow", fps=20)
     print(f"Generated trajectory saved to {output_dir / 'trajectory.gif'}")
 
+    # Compute and log entropy estimate
+    print("\nComputing entropy estimate...")
+    num_entropy_samples = 1000  # Use smaller batch for images to avoid memory issues
+    x_init_entropy = torch.randn((num_entropy_samples, *input_shape), dtype=torch.float32, device=device)
+    class_list_entropy = torch.arange(num_classes, device=device).repeat(num_entropy_samples // num_classes + 1)
+    class_list_entropy = class_list_entropy[:num_entropy_samples]
+
+    _, entropy = solver.sample_with_entropy(
+        x_init=x_init_entropy,
+        step_size=step_size,
+        method="midpoint",
+        time_grid=time_steps,
+        return_intermediates=False,
+        n_probe=2,  # Use 2 probe vectors for Hutchinson estimator
+        use_exact_divergence=False,  # Use Hutchinson for images
+        y=class_list_entropy,
+    )
+
+    # Compute base entropy for reference
+    import numpy as np
+
+    flat_dim = np.prod(input_shape)
+    base_entropy = 0.5 * flat_dim * (1.0 + np.log(2.0 * np.pi))
+    entropy_value = entropy.item()
+
+    # Save to file
+    entropy_log_path = output_dir / "entropy_estimate.txt"
+    with open(entropy_log_path, "w") as f:
+        f.write("=" * 60 + "\n")
+        f.write("Entropy Estimation Results\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Dataset: {args.dataset}\n")
+        f.write(f"Image shape: {input_shape}\n")
+        f.write(f"Total dimensions: {flat_dim}\n")
+        f.write(f"Number of samples: {num_entropy_samples:,}\n")
+        f.write(f"Number of time steps: {len(time_steps)}\n")
+        f.write(f"Step size: {step_size}\n")
+        f.write(f"Integration method: midpoint\n")
+        f.write(f"Divergence estimator: Hutchinson (n_probe=2)\n\n")
+        f.write(f"Base entropy H(p_0): {base_entropy:.6f} nats\n")
+        f.write(f"Estimated entropy H(p_1): {entropy_value:.6f} nats\n")
+        f.write(f"Entropy change: {entropy_value - base_entropy:.6f} nats\n\n")
+        f.write("=" * 60 + "\n")
+        f.write("Formula: H(p_1) = H(p_0) + ∫_0^1 E[∇·v_θ(x_t, t)] dt\n")
+        f.write("=" * 60 + "\n")
+
+    print(f"\n{'=' * 60}")
+    print("Entropy Estimation Results")
+    print("=" * 60)
+    print(f"Base entropy H(p_0):       {base_entropy:.6f} nats")
+    print(f"Estimated entropy H(p_1):  {entropy_value:.6f} nats")
+    print(f"Entropy change:            {entropy_value - base_entropy:+.6f} nats")
+    print(f"Results saved to: {entropy_log_path}")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     parser = HfArgumentParser(ScriptArguments)

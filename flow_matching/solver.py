@@ -7,6 +7,12 @@ import torch
 from torch import Tensor, nn
 from torchdiffeq import odeint
 
+from flow_matching.utils_divergence import (
+    compute_entropy_from_divergence,
+    divergence_exact,
+    hutchinson_divergence,
+)
+
 
 def gradient(
     output: Tensor,
@@ -256,3 +262,103 @@ class ODESolver:
             return sol, source_log_p + log_det[-1]
         else:
             return sol[-1], source_log_p + log_det[-1]
+
+    def sample_with_entropy(
+        self,
+        x_init: Tensor,
+        step_size: float | None,
+        method: str = "euler",
+        atol: float = 1e-5,
+        rtol: float = 1e-5,
+        time_grid: Tensor | None = None,
+        return_intermediates: bool = False,
+        enable_grad: bool = False,
+        n_probe: int = 2,
+        use_exact_divergence: bool | None = None,
+        **model_extras,
+    ) -> tuple[Tensor | Sequence[Tensor], Tensor]:
+        r"""Sample with entropy estimation via divergence integration.
+
+        Computes H(p_1) = H(p_0) + ∫_0^1 E[∇·v_θ(x_t, t)] dt during sampling.
+
+        Args:
+            x_init (Tensor): initial conditions (e.g., source samples :math:`X_0 \sim p`). Shape: [batch_size, ...].
+            step_size (Optional[float]): The step size. Must be None for adaptive step solvers.
+            method (str): A method supported by torchdiffeq. Defaults to "euler".
+            atol (float): Absolute tolerance for adaptive step solvers.
+            rtol (float): Relative tolerance for adaptive step solvers.
+            time_grid (Tensor): Time discretization. Defaults to torch.tensor([0.0, 1.0]).
+            return_intermediates (bool): If True, return intermediate time steps. Defaults to False.
+            enable_grad (bool): Whether to compute gradients during sampling. Defaults to False.
+            n_probe (int): Number of probe vectors for Hutchinson estimator (for high-dim). Defaults to 2.
+            use_exact_divergence (Optional[bool]): If True, use exact divergence. If False, use Hutchinson.
+                If None (default), automatically choose based on dimensionality (exact for D <= 4).
+            **model_extras: Additional input for the model.
+
+        Returns:
+            Tuple[Union[Tensor, Sequence[Tensor]], Tensor]:
+                - Samples at time_grid (final or all intermediate steps)
+                - Entropy estimate H(p_1) as a scalar tensor
+
+        Example:
+            >>> solver = ODESolver(flow_model)
+            >>> x_init = torch.randn(100, 2)
+            >>> samples, entropy = solver.sample_with_entropy(
+            ...     x_init, step_size=0.05, method="midpoint", n_probe=2
+            ... )
+        """
+        if time_grid is None:
+            time_grid = torch.tensor([0.0, 1.0], device=x_init.device)
+        else:
+            time_grid = time_grid.to(x_init.device)
+
+        # Determine whether to use exact divergence based on dimensionality
+        if use_exact_divergence is None:
+            # Flatten to compute total dimensionality
+            flat_dim = x_init.view(x_init.size(0), -1).size(1)
+            use_exact_divergence = flat_dim <= 4
+
+        # First sample the trajectory
+        sol = self.sample(
+            x_init=x_init,
+            step_size=step_size,
+            method=method,
+            atol=atol,
+            rtol=rtol,
+            time_grid=time_grid,
+            return_intermediates=True,
+            enable_grad=enable_grad,
+            **model_extras,
+        )
+
+        # Compute divergence at each time step
+        divergence_values = []
+
+        with torch.set_grad_enabled(enable_grad):
+            for i, t in enumerate(time_grid):
+                x_t = sol[i]
+                t_batch = torch.full((x_t.size(0),), t.item(), device=x_t.device)
+
+                # Create a closure for the velocity function at this time
+                def v_func(x, t_val):
+                    return self.velocity_model(x=x, t=t_val, **model_extras)
+
+                if use_exact_divergence:
+                    # For 2D toy datasets, use exact divergence
+                    div = divergence_exact(v_func, x_t, t_batch)
+                else:
+                    # For high-dimensional images, use Hutchinson estimator
+                    div = hutchinson_divergence(v_func, x_t, t_batch, n_probe=n_probe)
+
+                divergence_values.append(div)
+
+        # Compute entropy from divergence integration
+        flat_dim = x_init.view(x_init.size(0), -1).size(1)
+        entropy = compute_entropy_from_divergence(
+            divergence_values, time_grid, dim=flat_dim
+        )
+
+        if return_intermediates:
+            return sol, entropy
+        else:
+            return sol[-1], entropy

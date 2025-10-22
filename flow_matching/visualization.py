@@ -9,6 +9,10 @@ from torch.distributions import Independent, Normal
 
 from flow_matching.datasets import SyntheticDataset
 from flow_matching.solver import ModelWrapper, ODESolver
+from flow_matching.utils_divergence import (
+    compute_entropy_from_divergence,
+    divergence_exact,
+)
 
 
 def plot_ode_sampling_evolution(
@@ -257,3 +261,92 @@ def plot_likelihood(
 
     plt.savefig(output_dir / filename)
     print("Likelihood saved to", output_dir / filename)
+
+
+def compute_and_log_entropy(
+    flow: ModelWrapper,
+    dataset: SyntheticDataset,
+    num_samples: int = 10_000,
+    step_size: float = 0.05,
+    sample_steps: int = 101,
+    output_dir: str = ".",
+    filename: str = "entropy_estimate.txt",
+) -> float:
+    """
+    Compute and log the entropy estimate H(p_1) for generated samples.
+
+    This function estimates the entropy of the final distribution p_1 using:
+        H(p_1) = H(p_0) + ∫_0^1 E[∇·v_θ(x_t, t)] dt
+
+    where H(p_0) is the entropy of the standard Gaussian base distribution.
+
+    Args:
+        flow (ModelWrapper): The flow model to sample from.
+        dataset (SyntheticDataset): The dataset (used for dimensionality).
+        num_samples (int, optional): Number of samples for entropy estimation. Default is 10,000.
+        step_size (float, optional): Step size for ODE solver. Default is 0.05.
+        sample_steps (int, optional): Number of time steps for integration. Default is 101.
+        output_dir (str, optional): Directory to save the entropy log. Default is current directory.
+        filename (str, optional): Name of the output file. Default is "entropy_estimate.txt".
+
+    Returns:
+        float: The estimated entropy H(p_1)
+
+    Note:
+        For 2D datasets, this uses exact divergence computation.
+        The accuracy depends on the number of time steps and samples used.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    flow.eval()
+    device = next(flow.parameters()).device
+
+    x_init = torch.randn((num_samples, dataset.dim), dtype=torch.float32, device=device)
+    time_grid = torch.linspace(0, 1, sample_steps).to(device)
+
+    solver = ODESolver(flow)
+
+    # Use the new sample_with_entropy method
+    sol, entropy = solver.sample_with_entropy(
+        x_init=x_init,
+        step_size=step_size,
+        method="midpoint",
+        time_grid=time_grid,
+        return_intermediates=False,
+        use_exact_divergence=True,  # For 2D datasets
+    )
+
+    entropy_value = entropy.item()
+
+    # Compute base entropy for reference
+    base_entropy = 0.5 * dataset.dim * (1.0 + np.log(2.0 * np.pi))
+
+    # Save to file
+    log_path = output_dir / filename
+    with open(log_path, "w") as f:
+        f.write("=" * 60 + "\n")
+        f.write("Entropy Estimation Results\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Dataset dimension: {dataset.dim}\n")
+        f.write(f"Number of samples: {num_samples:,}\n")
+        f.write(f"Number of time steps: {sample_steps}\n")
+        f.write(f"Step size: {step_size}\n")
+        f.write(f"Integration method: midpoint\n\n")
+        f.write(f"Base entropy H(p_0): {base_entropy:.6f} nats\n")
+        f.write(f"Estimated entropy H(p_1): {entropy_value:.6f} nats\n")
+        f.write(f"Entropy change: {entropy_value - base_entropy:.6f} nats\n\n")
+        f.write("=" * 60 + "\n")
+        f.write("Formula: H(p_1) = H(p_0) + ∫_0^1 E[∇·v_θ(x_t, t)] dt\n")
+        f.write("=" * 60 + "\n")
+
+    print(f"\n{'=' * 60}")
+    print("Entropy Estimation Results")
+    print("=" * 60)
+    print(f"Base entropy H(p_0):       {base_entropy:.6f} nats")
+    print(f"Estimated entropy H(p_1):  {entropy_value:.6f} nats")
+    print(f"Entropy change:            {entropy_value - base_entropy:+.6f} nats")
+    print(f"Results saved to: {log_path}")
+    print("=" * 60)
+
+    return entropy_value
