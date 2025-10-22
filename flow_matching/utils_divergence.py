@@ -56,15 +56,11 @@ def divergence_exact(v_func, x: Tensor, t: Tensor) -> Tensor:
     return result.detach()
 
 
-@torch.no_grad()
 def hutchinson_divergence(v_func, x: Tensor, t: Tensor, n_probe: int = 1) -> Tensor:
     """Hutchinson's trace estimator for high-dimensional divergence (e.g., images).
 
     This is an unbiased estimator of the trace of the Jacobian using random probe vectors.
     The estimator is E[z^T (∇v) z] where z ~ N(0, I) or Rademacher distribution.
-
-    For training-time use with backpropagation, remove @torch.no_grad() decorator
-    and pass create_graph=True to the grad call.
 
     Args:
         v_func: Velocity function that takes (x, t) and returns velocity
@@ -86,22 +82,21 @@ def hutchinson_divergence(v_func, x: Tensor, t: Tensor, n_probe: int = 1) -> Ten
     Note:
         - n_probe=1-4 usually provides good variance/cost tradeoff
         - Higher n_probe reduces variance but increases computation
-        - For sampling (no grad needed), use @torch.no_grad() (default)
-        - For training, remove @torch.no_grad() and set create_graph=True
+        - This function computes gradients only for divergence estimation,
+          results are detached before returning
     """
-    div_est = torch.zeros(x.size(0), device=x.device)
+    div_est = []
 
     for _ in range(n_probe):
-        # Use Rademacher distribution for probe vectors (more efficient than Gaussian)
+        # Use standard Gaussian probe vectors (standard in Hutchinson estimator)
         eps = torch.randn_like(x)
-        eps = eps / (eps.norm(dim=tuple(range(1, eps.ndim)), keepdim=True) + 1e-8)
 
-        # We need gradients for the Hutchinson estimator
+        # Compute divergence with gradients enabled
         with torch.enable_grad():
             x_copy = x.detach().requires_grad_(True)
             v = v_func(x_copy, t)
 
-            # Compute v^T ε (Pearlmutter trick)
+            # Compute v^T ε
             v_eps = (v * eps).sum()
 
             # Compute ∇(v^T ε) · ε = trace estimate
@@ -109,10 +104,12 @@ def hutchinson_divergence(v_func, x: Tensor, t: Tensor, n_probe: int = 1) -> Ten
                 v_eps, x_copy, create_graph=False, retain_graph=False
             )[0]
 
+            # Compute divergence contribution for this probe
             div_contribution = (grad_v_eps * eps).view(x.size(0), -1).sum(dim=1)
-            div_est = div_est + div_contribution
+            div_est.append(div_contribution.detach())
 
-    return div_est / float(n_probe)
+    # Average over all probes
+    return torch.stack(div_est).mean(dim=0)
 
 
 def compute_entropy_from_divergence(
