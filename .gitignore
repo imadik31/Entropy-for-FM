@@ -177,3 +177,6 @@ sandbox*
 data/*
 !data/invertocat.png
 !data/siggraph.pkl
+
+# Entropy estimation test outputs
+outputs/**/entropy_*_test.txt
