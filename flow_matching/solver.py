@@ -2,6 +2,7 @@
 
 from abc import ABC
 from collections.abc import Callable, Sequence
+from typing import Optional, Union
 
 import torch
 from torch import Tensor, nn
@@ -17,7 +18,7 @@ from flow_matching.utils_divergence import (
 def gradient(
     output: Tensor,
     x: Tensor,
-    grad_outputs: Tensor | None = None,
+    grad_outputs: Optional[Tensor] = None,
     create_graph: bool = False,
 ) -> Tensor:
     """
@@ -83,22 +84,22 @@ class ODESolver:
         velocity_model (Union[ModelWrapper, Callable]): a velocity field model receiving :math:`(x,t)` and returning :math:`u_t(x)`
     """
 
-    def __init__(self, velocity_model: ModelWrapper | Callable):
+    def __init__(self, velocity_model: Union[ModelWrapper, Callable]):
         super().__init__()
         self.velocity_model = velocity_model
 
     def sample(
         self,
         x_init: Tensor,
-        step_size: float | None,
+        step_size: Optional[float],
         method: str = "euler",
         atol: float = 1e-5,
         rtol: float = 1e-5,
-        time_grid: Tensor | None = None,
+        time_grid: Optional[Tensor] = None,
         return_intermediates: bool = False,
         enable_grad: bool = False,
         **model_extras,
-    ) -> Tensor | Sequence[Tensor]:
+    ) -> Union[Tensor, Sequence[Tensor]]:
         r"""Solve the ODE with the velocity field.
 
         Example:
@@ -170,16 +171,16 @@ class ODESolver:
         self,
         x_1: Tensor,
         log_p0: Callable[[Tensor], Tensor],
-        step_size: float | None,
+        step_size: Optional[float],
         method: str = "euler",
         atol: float = 1e-5,
         rtol: float = 1e-5,
-        time_grid: Tensor | None = None,
+        time_grid: Optional[Tensor] = None,
         return_intermediates: bool = False,
         exact_divergence: bool = False,
         enable_grad: bool = False,
         **model_extras,
-    ) -> tuple[Tensor, Tensor] | tuple[Sequence[Tensor], Tensor]:
+    ) -> Union[tuple[Tensor, Tensor], tuple[Sequence[Tensor], Tensor]]:
         r"""Solve for log likelihood given a target sample at :math:`t=0`.
 
         Works similarly to sample, but solves the ODE in reverse to compute the log-likelihood. The velocity model must be differentiable with respect to x.
@@ -266,17 +267,17 @@ class ODESolver:
     def sample_with_entropy(
         self,
         x_init: Tensor,
-        step_size: float | None,
+        step_size: Optional[float],
         method: str = "euler",
         atol: float = 1e-5,
         rtol: float = 1e-5,
-        time_grid: Tensor | None = None,
+        time_grid: Optional[Tensor] = None,
         return_intermediates: bool = False,
         enable_grad: bool = False,
         n_probe: int = 2,
-        use_exact_divergence: bool | None = None,
+        use_exact_divergence: Optional[bool] = None,
         **model_extras,
-    ) -> tuple[Tensor | Sequence[Tensor], Tensor]:
+    ) -> tuple[Union[Tensor, Sequence[Tensor]], Tensor]:
         r"""Sample with entropy estimation via divergence integration.
 
         Computes H(p_1) = H(p_0) + ∫_0^1 E[∇·v_θ(x_t, t)] dt during sampling.
